@@ -429,4 +429,1188 @@ The first chain receives the calculated market metrics and generates a concise s
 
 ```text
 Metrics
+   ↓
+ChatPromptTemplate
+   ↓
+Llama 3
+   ↓
+StrOutputParser
+   ↓
+Market Summary
 ```
+
+The summary focuses on:
+
+* leaders
+* laggards
+* momentum
+* volatility
+* general market state
+
+---
+
+## Chain 2 — Risk Analysis
+
+The second chain receives:
+
+```text
+Market Metrics
++
+Market Summary
+```
+
+It identifies:
+
+* overbought assets
+* oversold assets
+* high volatility
+* significant drawdowns
+* unusual market behavior
+
+The output is a short textual risk analysis.
+
+---
+
+## Chain 3 — Structured Insights
+
+The final chain receives:
+
+```text
+Market Metrics
++
+Market Summary
++
+Risk Analysis
+```
+
+and produces structured insights.
+
+The output is validated against:
+
+```python
+LLMInsights
+```
+
+which contains:
+
+```text
+market_outlook
+insights
+risks
+```
+
+Each insight contains:
+
+```text
+asset
+signal
+confidence
+rationale
+```
+
+---
+
+# 7. Structured Output Validation
+
+A major reliability feature is the use of:
+
+```python
+PydanticOutputParser
+```
+
+The LLM is instructed to return JSON matching the expected Pydantic schema.
+
+Conceptually:
+
+```text
+LLM
+ ↓
+JSON response
+ ↓
+PydanticOutputParser
+ ↓
+LLMInsights
+```
+
+If the generated response cannot be parsed, the application retries the structured insight generation.
+
+The project currently allows two attempts.
+
+If both attempts fail, the report records an error rather than returning invalid structured data.
+
+---
+
+# 8. Why Ollama?
+
+Ollama is used to run Llama 3 locally.
+
+Instead of:
+
+```text
+Application
+    ↓
+Cloud LLM API
+    ↓
+Internet
+```
+
+the architecture is:
+
+```text
+Application
+    ↓
+Ollama
+    ↓
+Local Llama 3
+```
+
+Advantages:
+
+* No external LLM API key required
+* No per-request API charges
+* Local inference
+* Better control over the development environment
+* Useful for experimenting with open-source models
+
+The trade-off is that local inference requires sufficient CPU/RAM/GPU resources and can be slower than hosted inference.
+
+---
+
+# 9. FastAPI Backend
+
+FastAPI acts as the application's backend and API layer.
+
+It provides:
+
+* REST endpoints
+* Request validation
+* Response validation
+* Automatic OpenAPI documentation
+* Swagger UI
+* Asynchronous endpoint support
+
+The application is created with:
+
+```python
+app = FastAPI(...)
+```
+
+and endpoints are defined using decorators such as:
+
+```python
+@app.get(...)
+@app.post(...)
+```
+
+---
+
+# 10. API Endpoints
+
+## Health Check
+
+```http
+GET /health
+```
+
+Returns the current service status.
+
+Example:
+
+```json
+{
+  "status": "ok",
+  "model": "llama3",
+  "autonomous": true
+}
+```
+
+---
+
+## Agent Status
+
+```http
+GET /agent/status
+```
+
+Returns information about the autonomous workflow.
+
+Example information includes:
+
+* Last execution
+* Last error
+* Number of completed cycles
+* Configured execution interval
+* Tracked coins
+
+---
+
+## Market Snapshot
+
+```http
+GET /market/snapshot
+```
+
+Example:
+
+```text
+GET /market/snapshot?coins=bitcoin,ethereum
+```
+
+Returns live market data and calculated indicators.
+
+Importantly, this endpoint does **not** invoke the LLM.
+
+This allows clients to retrieve deterministic market metrics without paying the computational cost of LLM inference.
+
+---
+
+## Run Analysis
+
+```http
+POST /analyze
+```
+
+Triggers the complete market intelligence workflow immediately.
+
+Optional request body:
+
+```json
+{
+  "coins": [
+    "bitcoin",
+    "ethereum"
+  ]
+}
+```
+
+Workflow:
+
+```text
+Request
+ ↓
+Fetch market data
+ ↓
+Compute indicators
+ ↓
+LLM summary
+ ↓
+LLM risk analysis
+ ↓
+Structured insights
+ ↓
+Save report
+ ↓
+Return response
+```
+
+---
+
+## Latest Report
+
+```http
+GET /insights/latest
+```
+
+Returns the most recently generated report.
+
+---
+
+## Report History
+
+```http
+GET /insights/history?limit=10
+```
+
+Returns previous reports.
+
+The limit can range from:
+
+```text
+1 → 100
+```
+
+---
+
+# 11. Example Response
+
+A successful report has the following general structure:
+
+```json
+{
+  "id": 1,
+  "created_at": "2026-10-04T12:00:00Z",
+  "model": "llama3",
+  "metrics": [
+    {
+      "id": "bitcoin",
+      "symbol": "BTC",
+      "price": 100000,
+      "change_1h_pct": 0.5,
+      "change_24h_pct": 2.1,
+      "change_7d_pct": 5.2,
+      "sma_24h": 98750,
+      "volatility_pct": 1.23,
+      "rsi_14": 64.2,
+      "max_drawdown_7d_pct": -4.1,
+      "trend": "up"
+    }
+  ],
+  "summary": "The market is showing...",
+  "risk_analysis": "- Bitcoin is approaching...",
+  "insights": {
+    "market_outlook": "Moderately bullish",
+    "insights": [
+      {
+        "asset": "bitcoin",
+        "signal": "bullish",
+        "confidence": 0.78,
+        "rationale": "Positive seven-day momentum..."
+      }
+    ],
+    "risks": [
+      "Elevated volatility"
+    ]
+  },
+  "error": null,
+  "disclaimer": "Automated analysis for educational purposes only. Not financial advice."
+}
+```
+
+---
+
+# 12. Autonomous Execution
+
+The application can automatically execute analysis cycles.
+
+The background process is started during FastAPI's application lifespan.
+
+Conceptually:
+
+```text
+Application Startup
+        ↓
+Check autonomous_enabled
+        ↓
+Create background task
+        ↓
+Wait 5 seconds
+        ↓
+Run analysis
+        ↓
+Save report
+        ↓
+Wait 900 seconds
+        ↓
+Run again
+        ↓
+Repeat
+```
+
+The interval is configurable using:
+
+```env
+FETCH_INTERVAL_SECONDS=900
+```
+
+For example:
+
+```text
+300  → every 5 minutes
+900  → every 15 minutes
+1800 → every 30 minutes
+```
+
+Autonomous execution can be disabled with:
+
+```env
+AUTONOMOUS_ENABLED=false
+```
+
+---
+
+# 13. Database
+
+SQLite is used for persistent report storage.
+
+The database contains a `reports` table:
+
+```text
+reports
+--------------------------
+id
+created_at
+payload
+```
+
+The complete Pydantic report is serialized into JSON and stored in the `payload` column.
+
+When retrieving the report:
+
+```text
+SQLite JSON
+    ↓
+Pydantic validation
+    ↓
+Report object
+    ↓
+FastAPI response
+```
+
+This keeps the database layer simple while preserving the complete report structure.
+
+---
+
+# 14. Error Handling
+
+The project handles failures at multiple layers.
+
+## External API failure
+
+If CoinGecko fails:
+
+```text
+CoinGecko
+    ↓
+HTTP error
+    ↓
+httpx.HTTPError
+    ↓
+FastAPI
+    ↓
+HTTP 502
+```
+
+---
+
+## LLM failure
+
+If Ollama is unavailable, the model is missing, or inference times out:
+
+```text
+Ollama failure
+     ↓
+Exception
+     ↓
+Report.error
+```
+
+The application records the failure rather than crashing the entire API service.
+
+---
+
+## Invalid structured LLM output
+
+If Llama 3 produces invalid JSON:
+
+```text
+LLM
+ ↓
+Invalid JSON
+ ↓
+PydanticOutputParser
+ ↓
+OutputParserException
+ ↓
+Retry
+```
+
+After two failed attempts, the report records an error.
+
+---
+
+# 15. Configuration
+
+Configuration is managed through environment variables using Pydantic Settings.
+
+Example:
+
+```env
+OLLAMA_MODEL=llama3
+COINS=bitcoin,ethereum,solana,ripple,cardano
+VS_CURRENCY=usd
+FETCH_INTERVAL_SECONDS=900
+AUTONOMOUS_ENABLED=true
+```
+
+The application also supports:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_TEMPERATURE=0.2
+LLM_TIMEOUT_SECONDS=180
+COINGECKO_BASE_URL=https://api.coingecko.com/api/v3
+DB_PATH=data/insights.db
+```
+
+When running inside Docker Compose, the API container uses:
+
+```text
+http://ollama:11434
+```
+
+because `ollama` is the Docker Compose service name.
+
+---
+
+# 16. Project Structure
+
+```text
+market-intel-agent/
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── agent.py
+│   ├── data_sources.py
+│   ├── schemas.py
+│   ├── store.py
+│   └── config.py
+│
+├── tests/
+│   └── test_app.py
+│
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── .env.example
+├── .dockerignore
+├── .gitignore
+└── README.md
+```
+
+### `main.py`
+
+Responsible for:
+
+* FastAPI application
+* API endpoints
+* application lifecycle
+* autonomous background loop
+* API-level error handling
+
+### `agent.py`
+
+Contains the LLM workflow:
+
+* Ollama configuration
+* LangChain prompts
+* summary chain
+* risk chain
+* structured insight chain
+* retry handling
+
+### `data_sources.py`
+
+Responsible for:
+
+* CoinGecko API calls
+* market data retrieval
+* technical indicator calculations
+
+### `schemas.py`
+
+Contains Pydantic models:
+
+* `AssetMetrics`
+* `Insight`
+* `LLMInsights`
+* `Report`
+* `AnalyzeRequest`
+
+### `store.py`
+
+Responsible for:
+
+* SQLite connection
+* report insertion
+* latest report retrieval
+* report history
+
+### `config.py`
+
+Responsible for:
+
+* environment configuration
+* default settings
+* tracked coin parsing
+
+### `tests/test_app.py`
+
+Contains automated tests for:
+
+* indicator calculation
+* API flow
+* LLM workflow
+* database/report retrieval
+
+---
+
+# 17. Docker Architecture
+
+Docker Compose runs three services.
+
+```text
+                    Docker Compose
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+          ▼              ▼              ▼
+       Ollama       Model Puller       API
+          │              │              │
+          │              └──────┐       │
+          │                     │       │
+          └──── Shared Model Volume    │
+                                      │
+                                FastAPI App
+                                      │
+                                SQLite Volume
+```
+
+## Ollama
+
+Runs the local LLM server.
+
+Port:
+
+```text
+11434
+```
+
+---
+
+## Model Puller
+
+A one-shot container that downloads the configured Llama model into the shared Ollama volume.
+
+This prevents the API container from having to manage model installation.
+
+---
+
+## API
+
+Builds the Python application using the Dockerfile.
+
+Port:
+
+```text
+8000
+```
+
+The API connects to Ollama using the Docker Compose service name:
+
+```text
+http://ollama:11434
+```
+
+---
+
+# 18. Persistent Docker Volumes
+
+Two named volumes are used.
+
+### `ollama_models`
+
+Stores downloaded Ollama models.
+
+This prevents downloading Llama 3 every time the containers restart.
+
+### `api_data`
+
+Stores:
+
+```text
+/srv/data/insights.db
+```
+
+This preserves generated reports across API container restarts.
+
+---
+
+# 19. Running With Docker
+
+## Step 1 — Clone the repository
+
+```bash
+git clone <repository-url>
+cd market-intel-agent
+```
+
+---
+
+## Step 2 — Create environment file
+
+```bash
+cp .env.example .env
+```
+
+On Windows, create `.env` manually if necessary.
+
+Example:
+
+```env
+OLLAMA_MODEL=llama3
+COINS=bitcoin,ethereum,solana,ripple,cardano
+VS_CURRENCY=usd
+FETCH_INTERVAL_SECONDS=900
+AUTONOMOUS_ENABLED=true
+```
+
+---
+
+## Step 3 — Start the application
+
+```bash
+docker compose up --build
+```
+
+The first startup downloads the configured Llama model.
+
+The model download may take several gigabytes of disk space.
+
+---
+
+## Step 4 — Open Swagger UI
+
+Visit:
+
+```text
+http://localhost:8000/docs
+```
+
+You can test all API endpoints directly from the browser.
+
+---
+
+## Step 5 — Check health
+
+```bash
+curl http://localhost:8000/health
+```
+
+---
+
+## Step 6 — Trigger analysis
+
+```bash
+curl -X POST http://localhost:8000/analyze
+```
+
+---
+
+# 20. Running Without Docker
+
+Docker is recommended, but the application can also run directly on the host.
+
+## Install Ollama
+
+Install Ollama and download the model:
+
+```bash
+ollama pull llama3
+```
+
+---
+
+## Create virtual environment
+
+Linux/macOS:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks script execution, activate the environment through Command Prompt instead:
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+---
+
+## Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Start FastAPI
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Swagger:
+
+```text
+http://localhost:8000/docs
+```
+
+---
+
+# 21. Testing
+
+The project uses `pytest`.
+
+Run:
+
+```bash
+pytest
+```
+
+The tests deliberately avoid depending on:
+
+* the real CoinGecko API
+* the real Ollama model
+
+Instead, the tests use:
+
+* mocked market data
+* `FakeListChatModel`
+
+This makes tests:
+
+* faster
+* deterministic
+* reproducible
+* independent of network availability
+
+Example testing flow:
+
+```text
+Test
+ ↓
+Fake market data
+ ↓
+Fake LLM responses
+ ↓
+FastAPI
+ ↓
+SQLite test database
+ ↓
+Assertions
+```
+
+---
+
+# 22. Technology Stack
+
+| Component         | Technology       | Purpose                    |
+| ----------------- | ---------------- | -------------------------- |
+| Language          | Python           | Application development    |
+| API Framework     | FastAPI          | REST API                   |
+| ASGI Server       | Uvicorn          | Application server         |
+| HTTP Client       | HTTPX            | External API requests      |
+| Data Source       | CoinGecko        | Live market data           |
+| LLM               | Llama 3          | Market-language analysis   |
+| Local LLM Runtime | Ollama           | Local model inference      |
+| LLM Framework     | LangChain Core   | Prompt/chain orchestration |
+| LLM Integration   | LangChain Ollama | Ollama integration         |
+| Validation        | Pydantic         | Input/output validation    |
+| Database          | SQLite           | Report persistence         |
+| Containerization  | Docker           | Application packaging      |
+| Orchestration     | Docker Compose   | Multi-container execution  |
+| Testing           | Pytest           | Automated testing          |
+
+---
+
+# 23. Why These Technologies?
+
+### Why FastAPI?
+
+FastAPI provides:
+
+* lightweight REST API development
+* automatic OpenAPI documentation
+* Pydantic integration
+* asynchronous endpoint support
+* good performance
+
+---
+
+### Why LangChain?
+
+LangChain provides abstractions for composing:
+
+```text
+Prompt
+   ↓
+LLM
+   ↓
+Parser
+```
+
+and allows the project to structure the market analysis as multiple reusable processing chains.
+
+---
+
+### Why Ollama?
+
+Ollama allows Llama 3 to run locally without depending on a paid cloud LLM provider.
+
+---
+
+### Why Llama 3?
+
+Llama 3 provides a capable open-source/local language model suitable for experimentation with:
+
+* summarization
+* reasoning
+* structured generation
+* market-data interpretation
+
+---
+
+### Why Pydantic?
+
+Pydantic provides strict validation for both API requests and structured LLM responses.
+
+---
+
+### Why Docker?
+
+Docker provides:
+
+* reproducible environments
+* dependency isolation
+* consistent deployment
+* simplified Ollama/API setup
+
+---
+
+### Why SQLite?
+
+SQLite is sufficient for a lightweight local application and removes the need to operate a separate database server.
+
+For a production, high-concurrency system, a database such as PostgreSQL would be more appropriate.
+
+---
+
+# 24. Current Limitations
+
+This project is intentionally designed as a local educational system rather than a production financial platform.
+
+Current limitations include:
+
+* SQLite is not ideal for high-concurrency production workloads
+* The autonomous scheduler runs inside the API process
+* CoinGecko availability/rate limits can affect data collection
+* Local LLM inference can be slow on CPU-only machines
+* The system does not provide real investment advice
+* Technical indicators are simplified implementations
+* There is no authentication layer
+* There is no user management
+* There is no distributed task queue
+* There is no horizontal scaling
+* There is no dedicated monitoring/observability stack
+
+---
+
+# 25. Possible Production Improvements
+
+A production-grade version could introduce:
+
+```text
+FastAPI
+   ↓
+Load Balancer
+   ↓
+Multiple API instances
+   ↓
+Redis / Kafka
+   ↓
+Background Workers
+   ↓
+PostgreSQL
+   ↓
+LLM Inference Service
+```
+
+Potential improvements include:
+
+### Database
+
+Replace SQLite with PostgreSQL.
+
+### Background Processing
+
+Move scheduled analysis into a dedicated worker system such as Celery or another task queue.
+
+### Message Streaming
+
+Introduce Kafka for high-volume event ingestion.
+
+### Caching
+
+Use Redis to cache frequently requested market data.
+
+### Authentication
+
+Add JWT/OAuth-based authentication.
+
+### Observability
+
+Add:
+
+* structured logging
+* metrics
+* tracing
+* health checks
+* alerting
+
+### Scaling
+
+Run multiple FastAPI instances behind a load balancer.
+
+### Model Serving
+
+Separate LLM inference from the API service so that the API layer can scale independently.
+
+---
+
+# 26. Important Engineering Design Decision
+
+One of the core design decisions in this project is:
+
+> **Use deterministic Python code for numerical calculations and use the LLM for interpretation.**
+
+Instead of:
+
+```text
+Raw Market Data
+      ↓
+      LLM
+      ↓
+"Calculate RSI, volatility and drawdown"
+```
+
+the project uses:
+
+```text
+Raw Market Data
+      ↓
+Python
+      ↓
+Accurate Indicators
+      ↓
+LLM
+      ↓
+Interpretation
+```
+
+This separation improves reliability because language models are not relied upon for deterministic numerical calculations.
+
+---
+
+# 27. Interview Explanation
+
+A concise explanation of the project is:
+
+> I built a locally hosted market intelligence backend that automatically collects live cryptocurrency data from CoinGecko, computes deterministic technical indicators such as RSI, SMA, volatility and drawdown, and passes those metrics through a multi-step LangChain workflow running on a local Llama 3 model using Ollama. The model first generates a market summary, then performs risk analysis, and finally produces structured insights validated with Pydantic. The results are persisted in SQLite and exposed through FastAPI REST endpoints. I also containerized the API and Ollama using Docker Compose and added automated tests with mocked market data and a fake LLM.
+
+---
+
+# 28. Key Interview Concepts Demonstrated
+
+This project demonstrates practical knowledge of:
+
+### Backend Engineering
+
+* REST APIs
+* FastAPI
+* HTTP
+* Pydantic
+* API error handling
+* asynchronous execution
+* external API integration
+
+### AI Engineering
+
+* LLMs
+* local model inference
+* Ollama
+* LangChain
+* prompt templates
+* sequential LLM chains
+* structured generation
+* output parsing
+* retry handling
+
+### Data Engineering
+
+* API ingestion
+* JSON processing
+* deterministic metric computation
+* persistence
+* historical report storage
+
+### Software Engineering
+
+* modular architecture
+* configuration management
+* exception handling
+* automated testing
+* mocking
+* logging
+
+### Deployment
+
+* Docker
+* Dockerfile
+* Docker Compose
+* container networking
+* persistent volumes
+* health checks
+
+---
+
+# 29. Future Architecture for a Scalable Version
+
+For larger workloads, the architecture could evolve toward:
+
+```text
+                    Market Data APIs
+                          │
+                          ▼
+                    Kafka / Queue
+                          │
+                          ▼
+                 Data Processing Layer
+                          │
+               ┌──────────┴──────────┐
+               ▼                     ▼
+          PostgreSQL             Analytics Store
+               │                     │
+               └──────────┬──────────┘
+                          ▼
+                    AI Processing
+                          │
+                   LLM Inference
+                          │
+                          ▼
+                    FastAPI Layer
+                          │
+                    Load Balancer
+                          │
+                          ▼
+                       Clients
+```
+
+This would allow the system to move from a local single-process application toward a more scalable distributed architecture.
+
+---
+
+# 30. Disclaimer
+
+This project is intended for **educational and software-engineering purposes only**.
+
+The generated insights are automated model outputs based on publicly available market data. They should not be interpreted as financial advice, investment recommendations, or guarantees of future market performance.
