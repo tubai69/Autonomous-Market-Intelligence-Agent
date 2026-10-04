@@ -1,0 +1,51 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mia-ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # GPU (optional, NVIDIA): uncomment
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
+  model-puller:            # one-shot: downloads Llama 3 into the shared volume, then exits
+    image: ollama/ollama:latest
+    container_name: mia-model-puller
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-llama3}"]
+    restart: "no"
+
+  api:
+    build: .
+    container_name: mia-api
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      DB_PATH: /srv/data/insights.db
+    volumes:
+      - api_data:/srv/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  api_data:
