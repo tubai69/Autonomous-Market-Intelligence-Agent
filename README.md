@@ -1,44 +1,432 @@
 # Autonomous Market Intelligence Agent
 
-Locally hosted AI agent (Python · FastAPI · LangChain · Ollama Llama 3 · Docker) that continuously pulls
-live crypto market data from the free public CoinGecko REST API, computes indicators, and uses a local LLM
-in a multi-step chain to produce actionable insights, served through a documented REST API.
+A locally hosted AI-powered market intelligence service that continuously collects live cryptocurrency market data, computes deterministic technical indicators, and uses a local Llama 3 model through LangChain to generate structured market insights.
 
-## Architecture
+The application exposes the complete workflow through a documented FastAPI REST API and can run continuously in the background at a configurable interval. Docker Compose is provided to run the FastAPI service and Ollama as isolated services with persistent model and application storage.
+
+> **Educational project only. This application does not provide financial advice or investment recommendations.**
+
+---
+
+## 1. Project Overview
+
+The **Autonomous Market Intelligence Agent** is designed to automate the process of collecting and interpreting cryptocurrency market data.
+
+Traditional market analysis requires manually:
+
+1. Collecting current market data
+2. Calculating technical indicators
+3. Comparing assets
+4. Identifying risks and anomalies
+5. Interpreting the data
+6. Producing a readable market report
+
+This project automates that workflow.
+
+The system:
+
+* Fetches live cryptocurrency data from the public CoinGecko REST API
+* Calculates technical indicators using deterministic Python code
+* Passes the calculated metrics to a local Llama 3 model
+* Uses LangChain to orchestrate multiple LLM processing steps
+* Generates market summaries and risk analysis
+* Produces structured JSON insights validated using Pydantic
+* Stores generated reports in SQLite
+* Exposes the functionality through RESTful FastAPI endpoints
+* Runs automatically in the background at a configurable interval
+* Can be containerized and deployed locally using Docker Compose
+
+---
+
+# 2. Key Features
+
+### Live Market Data
+
+Fetches current cryptocurrency information from the CoinGecko public REST API.
+
+The default tracked assets are:
+
+* Bitcoin
+* Ethereum
+* Solana
+* XRP
+* Cardano
+
+The list can be configured through environment variables.
+
+---
+
+### Deterministic Technical Analysis
+
+The application calculates several indicators before sending the information to the LLM:
+
+* Current price
+* 1-hour percentage change
+* 24-hour percentage change
+* 7-day percentage change
+* 24-hour Simple Moving Average
+* Volatility
+* 14-period RSI
+* 7-day maximum drawdown
+* Overall trend
+
+The calculations are performed in Python rather than asking the LLM to calculate numerical values.
+
+This design reduces the possibility of numerical hallucination.
+
+---
+
+### Multi-Step LLM Workflow
+
+The LLM analysis is divided into multiple stages:
+
+```text
+Market Metrics
+      ↓
+Market Summary
+      ↓
+Risk & Anomaly Analysis
+      ↓
+Structured Insights
 ```
-CoinGecko API -> indicators (SMA, RSI, volatility, drawdown, trend)
-              -> LangChain step 1: market summary
-              -> LangChain step 2: risk/anomaly analysis
-              -> LangChain step 3: structured JSON insights (Pydantic-validated, auto-retry)
-              -> SQLite -> FastAPI endpoints
-Background task re-runs the whole pipeline every FETCH_INTERVAL_SECONDS (autonomous).
+
+This makes the workflow easier to understand, test and debug than sending all information to the model in a single prompt.
+
+---
+
+### Local LLM Inference
+
+The project uses:
+
+* Ollama
+* Llama 3
+* LangChain
+* LangChain Ollama integration
+
+The model runs locally instead of relying on a paid cloud LLM API.
+
+This provides:
+
+* No per-request API cost
+* Local data processing
+* Reproducible development
+* Offline LLM inference once the model is downloaded
+
+---
+
+### Structured LLM Output
+
+The final LLM response is validated using Pydantic.
+
+Each generated insight contains:
+
+```json
+{
+  "asset": "bitcoin",
+  "signal": "bullish",
+  "confidence": 0.7,
+  "rationale": "Steady 7d gain"
+}
 ```
 
-## Run with Docker (recommended)
-```bash
-cp .env.example .env
-docker compose up --build
+The allowed signal values are:
+
+```text
+bullish
+bearish
+neutral
 ```
-First start downloads Llama 3 (~4.7 GB) via the `model-puller` service. Then open http://localhost:8000/docs
 
-## Endpoints
-| Method | Path | Purpose |
-|---|---|---|
-| GET | /health | liveness |
-| GET | /agent/status | autonomous loop status |
-| GET | /market/snapshot?coins=bitcoin,ethereum | live data + indicators (no LLM) |
-| POST | /analyze | run the full agent now |
-| GET | /insights/latest | latest stored report |
-| GET | /insights/history?limit=10 | past reports |
+Confidence is restricted to the range:
 
-## Run locally without Docker
-```bash
-ollama pull llama3
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+```text
+0.0 → 1.0
 ```
-## Tests
-`pytest` (uses a fake LLM and mocked market data; no Ollama or internet needed).
 
-*Educational project. Not financial advice.*
+This prevents the application from blindly trusting arbitrary text generated by the LLM.
+
+---
+
+### Automatic Background Execution
+
+When autonomous execution is enabled, FastAPI starts a background loop during application startup.
+
+The loop:
+
+1. Waits for the initial startup delay
+2. Fetches market data
+3. Calculates indicators
+4. Runs the LLM workflow
+5. Stores the generated report
+6. Updates execution status
+7. Waits for the configured interval
+8. Repeats
+
+The default interval is:
+
+```text
+900 seconds = 15 minutes
+```
+
+---
+
+### REST API
+
+The entire application is exposed through documented FastAPI endpoints.
+
+Swagger UI is automatically available at:
+
+```text
+http://localhost:8000/docs
+```
+
+---
+
+### Persistent Storage
+
+Generated reports are stored in SQLite.
+
+The application stores:
+
+* Report ID
+* Creation timestamp
+* Complete serialized report payload
+
+This allows previous analyses to be retrieved through the API.
+
+---
+
+### Dockerized Deployment
+
+The project includes:
+
+* Dockerfile
+* Docker Compose
+* Ollama container
+* Model-puller service
+* FastAPI API container
+* Persistent Docker volumes
+
+The application can therefore be started without manually installing Python dependencies or configuring Ollama on the host machine.
+
+---
+
+# 3. System Architecture
+
+```text
+                         ┌──────────────────────┐
+                         │    CoinGecko API     │
+                         │   Public REST API    │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │  Data Ingestion      │
+                         │      httpx            │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │ Metric Computation   │
+                         │                      │
+                         │ SMA                  │
+                         │ RSI                  │
+                         │ Volatility           │
+                         │ Drawdown             │
+                         │ Trend                │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                     ┌─────────────────────────────┐
+                     │       LangChain Workflow    │
+                     │                             │
+                     │  1. Market Summary          │
+                     │  2. Risk Analysis           │
+                     │  3. Structured Insights     │
+                     └──────────────┬──────────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │    Ollama / Llama 3  │
+                         │     Local LLM        │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │ Pydantic Validation  │
+                         │   Structured Output  │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │       SQLite         │
+                         │   Report Storage     │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │       FastAPI        │
+                         │     REST Service     │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │     API Consumers    │
+                         │ Browser / Postman    │
+                         │ Python / Frontend    │
+                         └──────────────────────┘
+```
+
+---
+
+# 4. End-to-End Workflow
+
+## Step 1 — Market Data Collection
+
+The application calls CoinGecko's market endpoint using `httpx`.
+
+Example request conceptually:
+
+```text
+GET /coins/markets
+```
+
+with parameters such as:
+
+```text
+vs_currency=usd
+ids=bitcoin,ethereum,solana
+sparkline=true
+price_change_percentage=1h,24h,7d
+```
+
+The response is JSON containing current prices, percentage changes and historical sparkline data.
+
+---
+
+## Step 2 — Deterministic Metric Calculation
+
+The raw market data is passed to:
+
+```python
+compute_metrics()
+```
+
+The application calculates the technical indicators itself.
+
+This is intentional.
+
+Instead of asking:
+
+> "LLM, calculate RSI and volatility."
+
+the application performs:
+
+```text
+Raw Data
+   ↓
+Python calculations
+   ↓
+Reliable numerical metrics
+   ↓
+LLM interpretation
+```
+
+The LLM therefore focuses on reasoning and interpretation rather than numerical computation.
+
+---
+
+# 5. Technical Indicators
+
+## Simple Moving Average
+
+The project calculates an average over the most recent available 24 hourly price observations.
+
+Conceptually:
+
+```text
+SMA = Sum of recent prices / Number of observations
+```
+
+It is used as a basic indicator of recent price level and momentum.
+
+---
+
+## Volatility
+
+Volatility is calculated from the standard deviation of hourly returns.
+
+Returns are calculated as:
+
+```text
+return = (current_price - previous_price) / previous_price
+```
+
+The standard deviation of those returns is then used as the volatility measure.
+
+Higher volatility indicates larger price fluctuations.
+
+---
+
+## RSI
+
+The project calculates a 14-period Relative Strength Index.
+
+Conceptually:
+
+```text
+RSI > 70
+    → potentially overbought
+
+RSI < 30
+    → potentially oversold
+```
+
+The RSI implementation is intentionally lightweight and designed for educational analysis rather than professional trading systems.
+
+---
+
+## Maximum Drawdown
+
+Maximum drawdown measures the largest decline from a previous peak.
+
+Conceptually:
+
+```text
+Drawdown = (Current Price - Previous Peak) / Previous Peak
+```
+
+The application calculates the worst drawdown over the available seven-day price history.
+
+---
+
+## Trend
+
+The project classifies the seven-day trend using the seven-day percentage change:
+
+```text
+7-day change > +3%
+        → up
+
+7-day change < -3%
+        → down
+
+otherwise
+        → sideways
+```
+
+This is a simple rule-based classification.
+
+---
+
+# 6. LangChain Workflow
+
+The project uses LangChain Core to construct three sequential processing chains.
+
+## Chain 1 — Market Summary
+
+The first chain receives the calculated market metrics and generates a concise summary.
+
+```text
+Metrics
+```
